@@ -19,3 +19,23 @@ Ovviamente i canali adc e i rank e le velocita ecc sono puramente di esempio.
 
 Oltre al copiaincolla del codice dovrete, potete impostare le due define
 AlAdc_NbrOfConversion e AlAdc_SizeBuffer
+
+![STM32AlAdc](images/cubeide01.png "img01")
+Naturalmente imposterete velocità piu elevate, ho impostato cosi lento per
+sviluppo e test.
+
+![STM32AlAdc](images/cubeide02.png "img02")
+I canali/rank li imposterete in base al vostro progetto, l'idea della
+libreria è che rimangano comunque fissi non impostabili a runtime ma solo
+a design time. Attenzione number of conversion deve corrispondere alla
+define AlAdc_NbrOfConversion
+ovviamente canali regolari non injected conversion.
+
+![STM32AlAdc](images/cubeide03.png "img03")
+Questa è solo un immagine per il codice effettivo vedi la cartella
+Core/Src/main.c
+
+
+
+
+

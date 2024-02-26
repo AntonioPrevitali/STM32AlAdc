@@ -9,6 +9,7 @@
   *
   *  For instructions, go to https://github.com/AntonioPrevitali/STM32AlAdc
   *  Created by Antonio Previtali 11 Jan 2024.
+  *  Bug fixed 26/02/2024 now work !
   *
   *  This Code/library is free software; you can redistribute it and/or
   *  modify it under the terms of the Gnu general public license version 3
@@ -87,7 +88,8 @@ static void MX_ADC1_Init(void);
 // la dimensione del buffer in ram sarà di
 //       AlAdc_NbrOfConversion * AlAdc_SizeBuffer * sizeof(uint16_t)
 //
-#define AlAdc_NbrOfConversion 3
+//  con 7 e 100 e le impostazioni in .ioc sono 2.275 ms di storico.
+#define AlAdc_NbrOfConversion 7
 #define AlAdc_SizeBuffer 100
 
 // prototype, public metod of library !
@@ -109,6 +111,10 @@ uint16_t AlAdc_GetDataAtPos(uint32_t xPos, uint16_t *xRank);  // vedi codice
 uint32_t AlAdc_cndtr_to_pos(uint32_t xcndtr);                 // vedi codice
 
 uint16_t AlAdc_FindAvgForRankPos(uint32_t xPos, uint16_t xRank, uint16_t pSkip, uint16_t nrM); // come sopra ma con anche pos di partenza.
+
+// le due seguenti aggiunte dopo aggiunte il 24/01/2024
+uint32_t AlAdc_FindPosForRankPos(uint32_t xPos, uint16_t xRank, uint16_t pSkip);
+uint16_t AlAdc_GetDataAtSkip(uint32_t xPos, uint16_t pSkip);
 
 void AlAdc_AggLastDMAPos(void);  // private da non usare
 
@@ -149,7 +155,8 @@ void AlAdc_Start()
 // Vedi AlAdc_FindRank
 void AlAdc_Start_Wait(uint32_t xPrel)
 {
-	if (xPrel > AlAdc_NbrOfConversion * AlAdc_SizeBuffer ) xPrel = AlAdc_NbrOfConversion * AlAdc_SizeBuffer;
+	if (xPrel > (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) -1  ) xPrel = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) - 1;
+	// qui sopra cera un #BUG# mancava -1 sarebbe da aggiornare nel publicato github
 	if (xPrel == 0) xPrel = 1; // la start attende comunque il primo.
 	// avvia
 	AlAdc_Start();
@@ -305,8 +312,8 @@ uint16_t AlAdc_FindRank(uint16_t xRank)
 		// un po meno fortunato ma basta andare leggermente piu indietro...
 		z1 = AlAdc_LastDMAPos + xRank - z1 - AlAdc_NbrOfConversion;
 	}
-	// buffer circolare...
-	if (z1 < 0) z1 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) - z1;
+	// buffer circolare... #BUG# faceva - di un negativo va fatto +
+	if (z1 < 0) z1 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) + z1;
 	return AlAdc_GetDataAtPos(z1, NULL);
 }
 
@@ -394,7 +401,8 @@ uint16_t AlAdc_FindAvgForRankPos(uint32_t xPos, uint16_t xRank, uint16_t pSkip, 
 	if (pSkip > 0)
 	{
 		z0 = xPos - pSkip;
-		if (z0 < 0) z0 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) - z0;  // buffer circ.
+        // #BUG# faceva - di un negativo va fatto +
+		if (z0 < 0) z0 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) + z0;  // buffer circ.
 	}
 	else z0 = xPos;
     // qui z0 è posizione da cui iniziare a cercare il Rank
@@ -411,17 +419,75 @@ uint16_t AlAdc_FindAvgForRankPos(uint32_t xPos, uint16_t xRank, uint16_t pSkip, 
 	{
 		z1 = z0 + xRank - z1 - AlAdc_NbrOfConversion;
 	}
-	if (z1 < 0) z1 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) - z1;  // buffer circ.
-	if (z1 >= (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) ) return 0;   // secure, non succede se parametri in corretti.
+    // #BUG# faceva - di un negativo va fatto +
+	if (z1 < 0) z1 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) + z1;  // buffer circ.
+	if (z1 >= (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) ) return 0;   // secure, non succede se parametri in corretti. a causa del #BUG# succedeva !
 	sumavg = AlAdc_Buffer[z1];
     // per trovare gli altri da caricare in sumavg basta indietreggiare di AlAdc_NbrOfConversion
     for (xi = 1; xi < nrM; xi++)  // parte da 1, uno già caricato in sumavg
 	{
 	    z1 = z1 - AlAdc_NbrOfConversion;  // indietreggia
-	    if (z1 < 0) z1 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) - z1; // buffer circ.
+        // #BUG# faceva - di un negativo va fatto +
+	    if (z1 < 0) z1 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) + z1; // buffer circ.
 	    sumavg += AlAdc_Buffer[z1];
 	}
     return sumavg / (uint32_t) nrM;
+}
+
+
+// 24/01/24 aggiunta dopo la prima publicazione e dopo aver risolto alcuni #BUG#
+//          questa consente passando una posizione di andare nel buffer
+//          a cercare il Rank, solo che non ritorna il valore bensi la posizione.
+//          Per ottenere il valore usare poi la AlAdc_GetDataAtPos
+//  Con la pSkip si puo indietreggiare prima di cercare
+//  se pSkip zero non indietreggia
+//
+uint32_t AlAdc_FindPosForRankPos(uint32_t xPos, uint16_t xRank, uint16_t pSkip)
+{
+	int32_t z0;  // ok sign
+	int32_t z1;  // ok sign
+
+	if (pSkip > 0)
+	{
+		z0 = xPos - pSkip;
+		if (z0 < 0) z0 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) + z0;  // buffer circ. si + perche negativo...
+	}
+	else z0 = xPos;
+    // qui z0 è posizione da cui iniziare a cercare il Rank
+	z1 = (z0 % AlAdc_NbrOfConversion ) + 1;
+	if (z1 == xRank)
+	{
+		z1 = z0;
+	}
+	else if (z1 > xRank)
+	{
+		z1 = z0 - z1 + xRank;
+	}
+	else
+	{
+		z1 = z0 + xRank - z1 - AlAdc_NbrOfConversion;
+	}
+    // si + perche negativo...
+	if (z1 < 0) z1 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) + z1;  // buffer circ.
+	if (z1 >= (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) ) return 0;   // secure!
+    return z1;
+}
+
+
+// è come la AlAdc_GetDataAtPos ma non ritorna il dato alla posizione xPos ma alla pSkip
+// indietro della xPos passata.
+// Utile usata con la AlAdc_FindPosForRankPos
+// si cerca per esempio Rank=3 e poi si AlAdc_GetDataAtSkip indietro di 1 di 2 ecc..
+// per leggere gli altri Rank.
+// Rispetto alla AlAdc_GetDataAtPos non c'è il Rank di ritorno.
+uint16_t AlAdc_GetDataAtSkip(uint32_t xPos, uint16_t pSkip)
+{
+	int32_t z0;
+
+	z0 = xPos - pSkip;
+	if (z0 < 0) z0 = (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) + z0;  // buffer circ. si + perche negativo...
+	if (z0 < 0 || z0 >= (AlAdc_NbrOfConversion * AlAdc_SizeBuffer) ) return 0;  // secure!
+	return AlAdc_Buffer[z0];
 }
 
 //------------------------------------------------------------------------
